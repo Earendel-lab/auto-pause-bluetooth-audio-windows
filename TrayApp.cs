@@ -10,6 +10,7 @@ sealed class TrayApp : ApplicationContext
     private readonly NotifyIcon _trayIcon;
     private readonly ToolStripMenuItem _enabledItem;
     private readonly ToolStripMenuItem _startupItem;
+    private readonly ToolStripMenuItem _notifyItem;
     // Hidden control created on the UI thread — used to reliably marshal COM callbacks
     // onto the message loop. SynchronizationContext.Current is null at ApplicationContext
     // constructor time (before Application.Run installs WindowsFormsSynchronizationContext).
@@ -20,6 +21,7 @@ sealed class TrayApp : ApplicationContext
     private bool _enabled = true;
 
     private const string RegistryRunKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+    private const string RegistryConfigKey = @"SOFTWARE\BtAudioGuard";
     private const string AppName = "BtAudioGuard";
 
     public TrayApp()
@@ -36,12 +38,17 @@ sealed class TrayApp : ApplicationContext
         {
             Checked = IsStartupEnabled()
         };
+        _notifyItem = new ToolStripMenuItem("Show notifications", null, ToggleNotify)
+        {
+            Checked = IsNotifyEnabled()
+        };
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem("BT Audio Guard") { Enabled = false, Font = new Font(SystemFonts.MenuFont!, FontStyle.Bold) });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_enabledItem);
         menu.Items.Add(_startupItem);
+        menu.Items.Add(_notifyItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, Exit);
 
@@ -56,7 +63,7 @@ sealed class TrayApp : ApplicationContext
         StartMonitor();
 
         // Show after Application.Run starts the message loop
-        _invoker.BeginInvoke(() => NotificationToast.Show("BT Audio Guard is active"));
+        _invoker.BeginInvoke(() => { if (IsNotifyEnabled()) NotificationToast.Show("BT Audio Guard is active"); });
     }
 
     private void StartMonitor()
@@ -64,7 +71,7 @@ sealed class TrayApp : ApplicationContext
         _monitor = new AudioDeviceMonitor();
         _monitor.OnPaused = reason =>
         {
-            _invoker.BeginInvoke(() => NotificationToast.Show($"Media paused — {reason}"));
+            _invoker.BeginInvoke(() => { if (IsNotifyEnabled()) NotificationToast.Show($"Media paused — {reason}"); });
         };
         _monitor.Start();
     }
@@ -85,7 +92,7 @@ sealed class TrayApp : ApplicationContext
             _trayIcon.Text     = "BT Audio Guard — Active";
             _trayIcon.Icon     = _iconActive;
             StartMonitor();
-            NotificationToast.Show("Monitoring resumed");
+            if (IsNotifyEnabled()) NotificationToast.Show("Monitoring resumed");
         }
         else
         {
@@ -93,7 +100,7 @@ sealed class TrayApp : ApplicationContext
             _trayIcon.Text     = "BT Audio Guard — Paused";
             _trayIcon.Icon     = _iconPaused;
             StopMonitor();
-            NotificationToast.Show("Monitoring paused");
+            if (IsNotifyEnabled()) NotificationToast.Show("Monitoring paused");
         }
     }
 
@@ -102,6 +109,21 @@ sealed class TrayApp : ApplicationContext
         if (IsStartupEnabled()) RemoveStartup();
         else AddStartup();
         _startupItem.Checked = IsStartupEnabled();
+    }
+
+    private void ToggleNotify(object? sender, EventArgs e)
+    {
+        bool newValue = !IsNotifyEnabled();
+        using var key = Registry.CurrentUser.CreateSubKey(RegistryConfigKey);
+        key.SetValue("ShowNotifications", newValue ? 1 : 0);
+        _notifyItem.Checked = newValue;
+    }
+
+    private static bool IsNotifyEnabled()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RegistryConfigKey);
+        var val = key?.GetValue("ShowNotifications");
+        return val == null || (int)val != 0; // default: ON
     }
 
     private static bool IsStartupEnabled()

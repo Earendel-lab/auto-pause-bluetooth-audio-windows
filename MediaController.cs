@@ -36,10 +36,10 @@ static class MediaController
             }
 
             if (tasks.Count > 0)
-            {
                 await Task.WhenAll(tasks);
-                return; // SMTC handled it — skip key fallback
-            }
+
+            if (sessions.Count > 0)
+                return; // SMTC has sessions (playing or already paused) — never fall back to key press
         }
         catch { /* SMTC unavailable — fall through */ }
 
